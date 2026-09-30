@@ -56,7 +56,7 @@ async function fetchInstagramPermalink(mediaId, accessToken, apiVersion = 'v21.0
       await new Promise(r => setTimeout(r, 1500));
     }
   }
-  return 'https://www.instagram.com/three_littlebosses/';
+  return 'https://www.instagram.com/3lilbosses/';
 }
 
 /**

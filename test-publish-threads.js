@@ -127,7 +127,7 @@ async function run() {
       logger.success('Threads', `🔗 Xem bài viết tại: ${postDetails.data.permalink}`);
     }
   } catch (err) {
-    logger.info('Threads', `Link bài viết: https://www.threads.net/@three_littlebosses`);
+    logger.info('Threads', `Link bài viết: https://www.threads.net/@3lilbosses`);
   }
 
   // Dọn dẹp

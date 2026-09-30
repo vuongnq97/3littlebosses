@@ -82,7 +82,7 @@ const config = {
     enabled: parseBool(process.env.ENABLE_TIKTOK, true),
     webhookUrl: process.env.N8N_TIKTOK_WEBHOOK_URL || 'http://localhost:5678/webhook/3littlebosses-tiktok',
     credentialId: process.env.N8N_TIKTOK_CREDENTIAL_ID || 'waMts0FrkIYhCuzv',
-    channelUrl: process.env.TIKTOK_CHANNEL_URL || 'https://www.tiktok.com/@three_littlebosses',
+    channelUrl: process.env.TIKTOK_CHANNEL_URL || 'https://www.tiktok.com/@3lilbosses',
   },
 
   twitter: {

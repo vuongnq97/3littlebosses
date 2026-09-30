@@ -141,6 +141,8 @@ node index.js
 │   └── session-store.js         # Lưu trữ trạng thái phiên làm việc theo Telegram chat ID
 ├── storage/
 │   └── uploads/                 # Lưu trữ file tạm thời
+├── workflows/
+│   └── 3LITTLEBOSSES TIKTOK PUBLISHER.json  # Workflow n8n TikTok Publisher
 └── utils/
     ├── logger.js                # Hệ thống log màu
     └── file-helper.js           # Phân loại video, ảnh, tách hashtag

@@ -209,7 +209,7 @@ Bot hỗ trợ bạn đăng 1 Video hoặc Album Ảnh đồng thời lên 6 n�
 
         let line = `${icon} <b>${name}:</b> ${p.message}`;
         if (p.url) {
-          line += ` — <a href="${p.url}">Xem bài đăng</a>`;
+          line += ` — <a href="${p.url}">Xem tại đây</a>`;
         }
         msg += `${line}\n`;
       }
@@ -247,13 +247,24 @@ Bot hỗ trợ bạn đăng 1 Video hoặc Album Ảnh đồng thời lên 6 n�
       }
       await editTelegramMessage(chatId, progressMsgId, formatProgressText());
 
-      // Gửi báo cáo tổng kết
-      const reportMsg = `
-🎉 <b>KẾT QUẢ ĐĂNG TẢI HOÀN TẤT!</b>
-• Thành công: <b>${summary.successCount}/${summary.total}</b> nền tảng.
-${summary.success ? '✨ Tất cả nội dung đã được phân phối thành công!' : '⚠️ Có một số nền tảng gặp sự cố, vui lòng xem chi tiết ở trên.'}
-      `.trim();
-      await sendTelegramMessage(chatId, reportMsg);
+      // Gửi báo cáo tổng kết kèm danh sách link xem bài đăng
+      let reportMsg = `🎉 <b>KẾT QUẢ ĐĂNG TẢI HOÀN TẤT!</b>\n`;
+      reportMsg += `• Thành công: <b>${summary.successCount}/${summary.total}</b> nền tảng.\n\n`;
+
+      const successfulResults = (summary.results || []).filter(r => r.status === 'SUCCESS' && r.url);
+      if (successfulResults.length > 0) {
+        reportMsg += `🔗 <b>LINK XEM TẠI ĐÂY:</b>\n`;
+        for (const item of successfulResults) {
+          reportMsg += `• <b>${item.platform}:</b> <a href="${item.url}">Xem tại đây ↗</a>\n`;
+        }
+        reportMsg += `\n`;
+      }
+
+      reportMsg += summary.success
+        ? '✨ Tất cả nội dung đã được phân phối thành công!'
+        : '⚠️ Có một số nền tảng gặp sự cố, vui lòng xem chi tiết ở trên.';
+
+      await sendTelegramMessage(chatId, reportMsg.trim());
 
     } catch (publishErr) {
       logger.error('Telegram', `Lỗi nghiêm trọng khi xuất bản: ${publishErr.message}`);
@@ -300,10 +311,10 @@ async function handleVideoMessage(message) {
 🎬 <b>ĐÃ NHẬN 1 VIDEO THÀNH CÔNG!</b>
 • <b>Dung lượng:</b> ${fileSizeMb} MB | <b>Thời lượng:</b> ${duration}
 
-✍️ <b>Vui lòng gửi Caption và Hashtag bạn muốn đặt cho bài đăng:</b>
-<i>(Ví dụ: 3 bé mèo con nghịch ngợm #cat #kitten #pets #cute)</i>
+✍️ <b>Vui lòng gửi Caption cho bài đăng:</b>
+<i>(Ví dụ: 3 bé quậy tưng bừng. Bot sẽ tự động xuống dòng và thêm bộ 10 hashtags mặc định, riêng TikTok lấy 5 hashtags đầu tiên).</i>
 
-💡 Gõ <code>/skip</code> để dùng Caption mặc định
+💡 Gõ <code>/skip</code> để dùng Caption mặc định (3 Little Bosses 🐾)
 💡 Gõ <code>/cancel</code> để huỷ bỏ
     `.trim();
 
@@ -368,10 +379,10 @@ async function handlePhotoMessage(message) {
     const askMsg = `
 📸 <b>ĐÃ NHẬN ${session.files.length} HÌNH ẢNH!</b>
 
-✍️ <b>Vui lòng gửi Caption và Hashtag bạn muốn đặt cho bài đăng:</b>
-<i>(Ví dụ: Bộ ảnh cưng xỉu của 3 bé boss #cat #cute #meow)</i>
+✍️ <b>Vui lòng gửi Caption cho bài đăng:</b>
+<i>(Gõ caption tuỳ thích, bot sẽ tự động xuống dòng và thêm bộ hashtags mặc định #3LilBosses #ThreeLittleBosses...).</i>
 
-💡 Gõ <code>/skip</code> để dùng Caption mặc định
+💡 Gõ <code>/skip</code> để dùng Caption mặc định (3 Little Bosses 🐾)
 💡 Gõ <code>/cancel</code> để huỷ bỏ
     `.trim();
 

@@ -43,8 +43,15 @@ async function publishToTikTok({ jobId, mediaType, files, fullText, caption, has
 
   logger.info('TikTok', `Gửi tín hiệu webhook sang n8n: ${webhookUrl}`);
 
-  // Caption đầy đủ kèm hashtags từ Telegram
-  const combinedCaption = fullText || [caption, ...(Array.isArray(hashtags) ? hashtags : [])].filter(Boolean).join(' ');
+  // TikTok tối đa 5 hashtags đầu tiên, caption phải xuống dòng (enter) rồi mới tới hashtags
+  const tiktokTags = (Array.isArray(hashtags) && hashtags.length > 0)
+    ? hashtags.slice(0, 5)
+    : ['#3LilBosses', '#ThreeLittleBosses', '#Cats', '#CatLife', '#CatLovers'];
+
+  const pureCaption = String(caption || '3 Little Bosses 🐾').trim();
+  const tiktokCaption = `${pureCaption}\n\n${tiktokTags.join(' ')}`;
+
+  logger.info('TikTok', `Caption gửi TikTok (5 tags): "${pureCaption}" + [${tiktokTags.join(', ')}]`);
 
   const payload = {
     route: 'command',
@@ -52,8 +59,8 @@ async function publishToTikTok({ jobId, mediaType, files, fullText, caption, has
     targetJobId: jobId,
     videoUrl: publicVideoUrl,
     videoPath: files[0],
-    caption: combinedCaption,
-    hashtags: hashtags || [],
+    caption: tiktokCaption,
+    hashtags: tiktokTags,
     tiktokCredentialId: config.tiktok.credentialId,
     timestamp: Date.now(),
   };
@@ -66,7 +73,7 @@ async function publishToTikTok({ jobId, mediaType, files, fullText, caption, has
       || res.data?.data?.post_url
       || res.data?.share_url
       || config.tiktok.channelUrl
-      || 'https://www.tiktok.com/@three_littlebosses';
+      || 'https://www.tiktok.com/@3lilbosses';
 
     return {
       success: true,

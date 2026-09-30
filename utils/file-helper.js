@@ -40,24 +40,40 @@ function cleanJobDir(jobId) {
   }
 }
 
+const DEFAULT_HASHTAGS = [
+  '#3LilBosses',
+  '#ThreeLittleBosses',
+  '#Cats',
+  '#CatLife',
+  '#CatLovers',
+  '#FunnyCats',
+  '#CuteCats',
+  '#CatsOfTikTok',
+  '#CatVideos',
+  '#DailyCats',
+];
+
 /**
  * Parses user message into caption and array of hashtags.
+ * Đảm bảo caption luôn xuống dòng (enter) rồi mới tới danh sách hashtag.
  * @param {string} text
  * @returns {{ caption: string, hashtags: string[], fullText: string }}
  */
 function parseCaptionAndHashtags(text = '') {
   const raw = String(text || '').trim();
   if (!raw || raw.toLowerCase() === '/skip') {
+    const caption = '3 Little Bosses 🐾';
+    const hashtags = [...DEFAULT_HASHTAGS];
     return {
-      caption: '3 Little Bosses 🐾',
-      hashtags: ['#cat', '#cute', '#pets', '#reels', '#shorts'],
-      fullText: '3 Little Bosses 🐾 #cat #cute #pets #reels #shorts',
+      caption,
+      hashtags,
+      fullText: `${caption}\n\n${hashtags.join(' ')}`,
     };
   }
 
   // Extract all hashtags (#word or #từ_khoá)
   const hashtagMatches = raw.match(/#[^\s#]+/g) || [];
-  const hashtags = hashtagMatches.map(h => h.trim());
+  let hashtags = hashtagMatches.map(h => h.trim());
 
   // Remove hashtags from text to get pure caption
   let caption = raw;
@@ -66,13 +82,17 @@ function parseCaptionAndHashtags(text = '') {
   }
   caption = caption.replace(/\s+/g, ' ').trim();
 
-  if (!caption && hashtags.length > 0) {
+  if (!caption) {
     caption = '3 Little Bosses 🐾';
   }
 
-  const fullText = hashtags.length > 0
-    ? `${caption}\n\n${hashtags.join(' ')}`
-    : caption;
+  // Nếu người dùng không nhập hashtag nào, tự động dùng bộ hashtag mặc định
+  if (hashtags.length === 0) {
+    hashtags = [...DEFAULT_HASHTAGS];
+  }
+
+  // Caption phải xuống dòng (enter) rồi mới tới hashtag
+  const fullText = `${caption}\n\n${hashtags.join(' ')}`;
 
   return {
     caption,

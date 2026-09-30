@@ -138,7 +138,7 @@ async function publishViaCookie({ mediaType, files, fullText }) {
     // Chờ giao diện hoàn tất
     await page.waitForTimeout(4000);
 
-    const tweetUrl = createdTweetId ? `https://x.com/3LittleBoss/status/${createdTweetId}` : 'https://x.com/3LittleBoss';
+    const tweetUrl = createdTweetId ? `https://x.com/3lilbosses/status/${createdTweetId}` : 'https://x.com/3lilbosses';
     logger.success('Twitter', `🎉 Đăng bài lên X (Twitter) qua Cookie thành công! ID: ${createdTweetId || 'N/A'}`);
 
     return {

@@ -106,7 +106,7 @@ async function publishToThreads({ jobId, mediaType, files, fullText }) {
   logger.success('Threads', `Đăng bài lên Threads thành công! ID: ${threadId}`);
 
   // Lấy permalink chuẩn của bài đăng Threads (dạng https://www.threads.net/@user/post/xxx)
-  let threadUrl = 'https://www.threads.net/@three_littlebosses';
+  let threadUrl = 'https://www.threads.net/@3lilbosses';
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const detailRes = await axios.get(
