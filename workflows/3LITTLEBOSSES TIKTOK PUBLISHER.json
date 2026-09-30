@@ -1,0 +1,146 @@
+{
+  "id": "3LittleBossesTk1",
+  "name": "3LittleBosses — TikTok Publisher",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "3littlebosses-tiktok",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "id": "node-3lb-webhook",
+      "name": "Webhook — 3LittleBosses",
+      "webhookId": "3littlebosses-tiktok-task"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nlet videoUrl = String(body.videoUrl || '');\n\n// Chuyển localhost máy Mac sang host.docker.internal nếu n8n chạy trong Docker\nvideoUrl = videoUrl.replace('http://localhost:3005', 'http://host.docker.internal:3005')\n                   .replace('http://127.0.0.1:3005', 'http://host.docker.internal:3005');\n\n// Lấy caption đầy đủ kèm hashtags từ Telegram gửi lên\nlet caption = String(body.caption || body.fullText || '').trim();\nif (!caption && Array.isArray(body.hashtags) && body.hashtags.length > 0) {\n  caption = body.hashtags.join(' ');\n} else if (Array.isArray(body.hashtags) && body.hashtags.length > 0 && !caption.includes('#')) {\n  caption = caption + ' ' + body.hashtags.join(' ');\n}\n\nconst targetJobId = body.targetJobId || body.jobId || ('job_' + Date.now());\nconst tiktokCredentialId = body.tiktokCredentialId || 'waMts0FrkIYhCuzv';\n\nreturn {\n  json: {\n    videoUrl,\n    caption,\n    targetJobId,\n    tiktokCredentialId,\n    timestamp: Date.now()\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ],
+      "id": "node-3lb-prepare-payload",
+      "name": "Prepare Payload"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.videoUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        300
+      ],
+      "id": "node-3lb-download-video",
+      "name": "Download Video"
+    },
+    {
+      "parameters": {
+        "postSettings": {
+          "text": "={{ $('Prepare Payload').first().json.caption }}",
+          "visibilityType": 0,
+          "allowComment": 1,
+          "scheduleTime": "=0"
+        }
+      },
+      "type": "n8n-nodes-social-tiktok.tikTokUpload",
+      "typeVersion": 1,
+      "position": [
+        960,
+        300
+      ],
+      "id": "node-3lb-tiktok-upload",
+      "name": "TikTok Upload",
+      "credentials": {
+        "tiktokApi": {
+          "id": "waMts0FrkIYhCuzv",
+          "name": "TikTok Credential account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: \"Đăng TikTok thành công!\", jobId: $('Prepare Payload').first().json.targetJobId, caption: $('Prepare Payload').first().json.caption, data: $json }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        300
+      ],
+      "id": "node-3lb-respond-webhook",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook — 3LittleBosses": {
+      "main": [
+        [
+          {
+            "node": "Prepare Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Payload": {
+      "main": [
+        [
+          {
+            "node": "Download Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Video": {
+      "main": [
+        [
+          {
+            "node": "TikTok Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TikTok Upload": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

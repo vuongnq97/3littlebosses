@@ -1,0 +1,33 @@
+# ==============================================================================
+# 3LITTLEBOSSES — GITIGNORE
+# ==============================================================================
+
+# 1. Environment Variables & Credentials (CRITICAL - DO NOT COMMIT!)
+.env
+.env.*
+!.env.example
+
+# 2. Dependencies
+node_modules/
+package-lock.json
+
+# 3. Dynamic Storage, Cache & Uploaded Videos
+storage/
+uploads/
+temp/
+*.log
+logs/
+
+# Do not commit heavy test video files, keep only lightweight images in assets
+assets/*.mp4
+assets/*.mov
+
+# 4. OS & Editor Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# 5. Deployment Cache
+.vercel/
