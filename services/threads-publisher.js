@@ -24,7 +24,8 @@ async function waitForThreadsStatus(containerId, accessToken, maxWaitMs = 120000
       return true;
     }
     if (status === 'ERROR') {
-      throw new Error(`Threads Container lỗi: ${res.data?.error_message || 'Unknown error'}`);
+      const detail = JSON.stringify(res.data);
+      throw new Error(`Threads Container lỗi: ${res.data?.error_message || 'Unknown error'} (Chi tiết: ${detail})`);
     }
 
     await new Promise(r => setTimeout(r, 3000));

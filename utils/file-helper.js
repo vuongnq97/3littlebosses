@@ -62,12 +62,12 @@ const DEFAULT_HASHTAGS = [
 function parseCaptionAndHashtags(text = '') {
   const raw = String(text || '').trim();
   if (!raw || raw.toLowerCase() === '/skip') {
-    const caption = '3 Little Bosses 🐾';
+    const caption = '';
     const hashtags = [...DEFAULT_HASHTAGS];
     return {
       caption,
       hashtags,
-      fullText: `${caption}\n\n${hashtags.join(' ')}`,
+      fullText: hashtags.join(' '),
     };
   }
 
@@ -82,17 +82,15 @@ function parseCaptionAndHashtags(text = '') {
   }
   caption = caption.replace(/\s+/g, ' ').trim();
 
-  if (!caption) {
-    caption = '3 Little Bosses 🐾';
-  }
-
   // Nếu người dùng không nhập hashtag nào, tự động dùng bộ hashtag mặc định
   if (hashtags.length === 0) {
     hashtags = [...DEFAULT_HASHTAGS];
   }
 
-  // Caption phải xuống dòng (enter) rồi mới tới hashtag
-  const fullText = `${caption}\n\n${hashtags.join(' ')}`;
+  // Nếu có caption: caption phải xuống dòng (enter) rồi mới tới hashtag. Nếu caption rỗng: chỉ gồm hashtag
+  const fullText = caption
+    ? `${caption}\n\n${hashtags.join(' ')}`
+    : hashtags.join(' ');
 
   return {
     caption,

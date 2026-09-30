@@ -14,7 +14,7 @@ async function publishToTikTok({ jobId, mediaType, files, fullText, caption, has
     logger.info('TikTok', `[DRY-RUN] Giả lập kích hoạt n8n TikTok Upload (${mediaType})`);
     return {
       success: true,
-      platform: 'TikTok (via n8n)',
+      platform: 'TikTok',
       type: mediaType,
       id: `simulated_tiktok_${Date.now()}`,
       url: 'https://tiktok.com',
@@ -28,7 +28,7 @@ async function publishToTikTok({ jobId, mediaType, files, fullText, caption, has
     return {
       success: true,
       skipped: true,
-      platform: 'TikTok (via n8n)',
+      platform: 'TikTok',
       message: 'Đã bỏ qua (TikTok không hỗ trợ bài đăng chỉ có hình ảnh)',
     };
   }
@@ -39,7 +39,9 @@ async function publishToTikTok({ jobId, mediaType, files, fullText, caption, has
   }
 
   const filename = path.basename(files[0]);
-  const publicVideoUrl = getPublicMediaUrl(jobId, filename);
+  const port = config.mediaServer.port || 3005;
+  // Ưu tiên n8n tải qua bridge nội bộ host.docker.internal để không phụ thuộc internet tunnel
+  const videoUrl = `http://host.docker.internal:${port}/media/${jobId}/${filename}`;
 
   logger.info('TikTok', `Gửi tín hiệu webhook sang n8n: ${webhookUrl}`);
 
@@ -48,16 +50,19 @@ async function publishToTikTok({ jobId, mediaType, files, fullText, caption, has
     ? hashtags.slice(0, 5)
     : ['#3LilBosses', '#ThreeLittleBosses', '#Cats', '#CatLife', '#CatLovers'];
 
-  const pureCaption = String(caption || '3 Little Bosses 🐾').trim();
-  const tiktokCaption = `${pureCaption}\n\n${tiktokTags.join(' ')}`;
+  const pureCaption = String(caption || '').trim();
+  const tiktokCaption = pureCaption
+    ? `${pureCaption}\n\n${tiktokTags.join(' ')}`
+    : tiktokTags.join(' ');
 
-  logger.info('TikTok', `Caption gửi TikTok (5 tags): "${pureCaption}" + [${tiktokTags.join(', ')}]`);
+  logger.info('TikTok', `Caption gửi TikTok (5 tags): ${pureCaption ? `"${pureCaption}" + ` : ''}[${tiktokTags.join(', ')}]`);
 
   const payload = {
     route: 'command',
     command: 'upload',
     targetJobId: jobId,
-    videoUrl: publicVideoUrl,
+    videoUrl: videoUrl,
+    publicVideoUrl: getPublicMediaUrl(jobId, filename),
     videoPath: files[0],
     caption: tiktokCaption,
     hashtags: tiktokTags,
@@ -77,7 +82,7 @@ async function publishToTikTok({ jobId, mediaType, files, fullText, caption, has
 
     return {
       success: true,
-      platform: 'TikTok (via n8n)',
+      platform: 'TikTok',
       type: 'video',
       id: jobId,
       data: res.data,

@@ -71,6 +71,31 @@ async function editTelegramMessage(chatId, messageId, text, options = {}) {
   }
 }
 
+async function answerCallbackQuery(callbackQueryId, text = '') {
+  const botUrl = getBotUrl();
+  if (!botUrl || !callbackQueryId) return;
+
+  try {
+    await tgHttp.post(`${botUrl}/answerCallbackQuery`, {
+      callback_query_id: callbackQueryId,
+      text: text || undefined,
+    });
+  } catch (_) {}
+}
+
+function buildActionButtons() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '⏩ Bỏ qua (Đăng ngay)', callback_data: 'cmd_skip' },
+          { text: '❌ Huỷ bỏ', callback_data: 'cmd_cancel' },
+        ],
+      ],
+    },
+  };
+}
+
 async function downloadTelegramFile(fileId, destinationPath) {
   const botUrl = getBotUrl();
   const token = config.telegram.botToken;
@@ -178,100 +203,148 @@ Bot hỗ trợ bạn đăng 1 Video hoặc Album Ảnh đồng thời lên 6 n�
 
   // Nếu đang trong trạng thái chờ nhập Caption & Hashtag
   if (sessionStore.isAwaitingCaption(chatId)) {
-    const session = sessionStore.get(chatId);
-    sessionStore.set(chatId, { status: 'PUBLISHING' });
+    await processPublishSession(chatId, text);
+  }
+}
 
-    const { caption, hashtags, fullText } = parseCaptionAndHashtags(text);
+/**
+ * Xử lý sự kiện Callback Query từ nút bấm Inline Keyboard
+ */
+async function handleCallbackQuery(cq) {
+  const chatId = String(cq.message?.chat?.id);
+  const data = String(cq.data || '');
+  const messageId = cq.message?.message_id;
 
-    logger.info('Telegram', `Nhận Caption từ chat ${chatId}: "${caption}" | Tags: ${hashtags.join(' ')}`);
+  if (!isChatAllowed(chatId)) {
+    await answerCallbackQuery(cq.id, '⛔ Không có quyền thực hiện.');
+    return;
+  }
 
-    // Gửi tin nhắn tiến độ khởi tạo
-    const progressMsgId = await sendTelegramMessage(chatId, `
+  if (data === 'cmd_cancel') {
+    await answerCallbackQuery(cq.id, 'Đã huỷ phiên.');
+    if (sessionStore.get(chatId)) {
+      const s = sessionStore.get(chatId);
+      if (s.jobId) cleanJobDir(s.jobId);
+      sessionStore.clear(chatId);
+      if (messageId) {
+        await editTelegramMessage(chatId, messageId, '❌ <b>Đã huỷ bỏ phiên tải lên hiện tại.</b>');
+      } else {
+        await sendTelegramMessage(chatId, '❌ <b>Đã huỷ bỏ phiên tải lên hiện tại.</b>');
+      }
+    } else {
+      if (messageId) {
+        await editTelegramMessage(chatId, messageId, 'ℹ️ Không có phiên tải lên nào đang chờ.');
+      }
+    }
+    return;
+  }
+
+  if (data === 'cmd_skip') {
+    await answerCallbackQuery(cq.id, 'Bắt đầu xuất bản với hashtag mặc định...');
+    if (sessionStore.isAwaitingCaption(chatId)) {
+      if (messageId) {
+        await editTelegramMessage(chatId, messageId, '✅ <b>Đã chọn bỏ qua caption (chỉ dùng hashtag mặc định).</b>');
+      }
+      await processPublishSession(chatId, '/skip');
+    } else {
+      await answerCallbackQuery(cq.id, '⚠️ Phiên đã hoàn tất hoặc không còn hiệu lực.');
+    }
+    return;
+  }
+}
+
+/**
+ * Thực thi luồng xuất bản đa nền tảng
+ */
+async function processPublishSession(chatId, text = '') {
+  if (!sessionStore.isAwaitingCaption(chatId)) return;
+
+  const session = sessionStore.get(chatId);
+  sessionStore.set(chatId, { status: 'PUBLISHING' });
+
+  const { caption, hashtags, fullText } = parseCaptionAndHashtags(text);
+
+  logger.info('Telegram', `Nhận Caption từ chat ${chatId}: "${caption}" | Tags: ${hashtags.join(' ')}`);
+
+  // Gửi tin nhắn tiến độ khởi tạo
+  const progressMsgId = await sendTelegramMessage(chatId, `
 🚀 <b>Bắt đầu đăng tải lên đa nền tảng...</b>
-📝 <b>Caption:</b> ${caption}
+📝 <b>Caption:</b> ${caption || '<i>(Không có)</i>'}
 🏷️ <b>Hashtag:</b> ${hashtags.join(' ') || '<i>Không có</i>'}
 
 <i>Đang khởi tạo các luồng xuất bản...</i>
-    `.trim());
+  `.trim());
 
-    // Trạng thái từng nền tảng để hiển thị real-time
-    const platformStatuses = new Map();
+  // Trạng thái từng nền tảng để hiển thị real-time
+  const platformStatuses = new Map();
 
-    const formatProgressText = () => {
-      let msg = `🚀 <b>TIẾN ĐỘ XUẤT BẢN ĐA NỀN TẢNG:</b>\n`;
+  const formatProgressText = () => {
+    let msg = `🚀 <b>TIẾN ĐỘ XUẤT BẢN ĐA NỀN TẢNG:</b>\n`;
+    if (caption) {
       msg += `📝 <b>Caption:</b> ${caption}\n\n`;
-
-      for (const [name, p] of platformStatuses.entries()) {
-        let icon = '⏳';
-        if (p.status === 'SUCCESS') icon = '✅';
-        if (p.status === 'FAILED') icon = '❌';
-        if (p.status === 'SKIPPED') icon = '⏭️';
-
-        let line = `${icon} <b>${name}:</b> ${p.message}`;
-        if (p.url) {
-          line += ` — <a href="${p.url}">Xem tại đây</a>`;
-        }
-        msg += `${line}\n`;
-      }
-      return msg.trim();
-    };
-
-    let updateTimer = null;
-    const triggerMessageUpdate = () => {
-      if (updateTimer) return;
-      updateTimer = setTimeout(async () => {
-        updateTimer = null;
-        await editTelegramMessage(chatId, progressMsgId, formatProgressText());
-      }, 1500);
-    };
-
-    const jobData = {
-      jobId: session.jobId,
-      mediaType: session.mediaType,
-      files: session.files,
-      caption,
-      hashtags,
-      fullText,
-    };
-
-    try {
-      const summary = await publishMultiPlatform(jobData, (update) => {
-        platformStatuses.set(update.platform, update);
-        triggerMessageUpdate();
-      });
-
-      // Huỷ throttle timer và cập nhật thông báo cuối cùng
-      if (updateTimer) {
-        clearTimeout(updateTimer);
-        updateTimer = null;
-      }
-      await editTelegramMessage(chatId, progressMsgId, formatProgressText());
-
-      // Gửi báo cáo tổng kết kèm danh sách link xem bài đăng
-      let reportMsg = `🎉 <b>KẾT QUẢ ĐĂNG TẢI HOÀN TẤT!</b>\n`;
-      reportMsg += `• Thành công: <b>${summary.successCount}/${summary.total}</b> nền tảng.\n\n`;
-
-      const successfulResults = (summary.results || []).filter(r => r.status === 'SUCCESS' && r.url);
-      if (successfulResults.length > 0) {
-        reportMsg += `🔗 <b>LINK XEM TẠI ĐÂY:</b>\n`;
-        for (const item of successfulResults) {
-          reportMsg += `• <b>${item.platform}:</b> <a href="${item.url}">Xem tại đây ↗</a>\n`;
-        }
-        reportMsg += `\n`;
-      }
-
-      reportMsg += summary.success
-        ? '✨ Tất cả nội dung đã được phân phối thành công!'
-        : '⚠️ Có một số nền tảng gặp sự cố, vui lòng xem chi tiết ở trên.';
-
-      await sendTelegramMessage(chatId, reportMsg.trim());
-
-    } catch (publishErr) {
-      logger.error('Telegram', `Lỗi nghiêm trọng khi xuất bản: ${publishErr.message}`);
-      await sendTelegramMessage(chatId, `❌ Gặp lỗi nghiêm trọng trong quá trình xuất bản: ${publishErr.message}`);
-    } finally {
-      sessionStore.clear(chatId);
     }
+
+    for (const [name, p] of platformStatuses.entries()) {
+      let icon = '⏳';
+      if (p.status === 'SUCCESS') icon = '✅';
+      if (p.status === 'FAILED') icon = '❌';
+      if (p.status === 'SKIPPED') icon = '⏭️';
+
+      let line = `${icon} <b>${name}:</b> ${p.message}`;
+      if (p.url) {
+        line += ` — <a href="${p.url}">Xem tại đây</a>`;
+      }
+      msg += `${line}\n`;
+    }
+    return msg.trim();
+  };
+
+  let updateTimer = null;
+  const triggerMessageUpdate = () => {
+    if (updateTimer) return;
+    updateTimer = setTimeout(async () => {
+      updateTimer = null;
+      await editTelegramMessage(chatId, progressMsgId, formatProgressText());
+    }, 1500);
+  };
+
+  const jobData = {
+    jobId: session.jobId,
+    mediaType: session.mediaType,
+    files: session.files,
+    caption,
+    hashtags,
+    fullText,
+  };
+
+  try {
+    const summary = await publishMultiPlatform(jobData, (update) => {
+      platformStatuses.set(update.platform, update);
+      triggerMessageUpdate();
+    });
+
+    // Huỷ throttle timer và cập nhật thông báo cuối cùng
+    if (updateTimer) {
+      clearTimeout(updateTimer);
+      updateTimer = null;
+    }
+    await editTelegramMessage(chatId, progressMsgId, formatProgressText());
+
+    // Gửi báo cáo tổng kết kèm danh sách link xem bài đăng
+    let reportMsg = `🎉 <b>KẾT QUẢ ĐĂNG TẢI HOÀN TẤT!</b>\n`;
+    reportMsg += `• Thành công: <b>${summary.successCount}/${summary.total}</b> nền tảng.\n\n`;
+
+    reportMsg += summary.success
+      ? '✨ Tất cả nội dung đã được phân phối thành công!'
+      : '⚠️ Có một số nền tảng gặp sự cố, vui lòng xem chi tiết ở trên.';
+
+    await sendTelegramMessage(chatId, reportMsg.trim());
+
+  } catch (publishErr) {
+    logger.error('Telegram', `Lỗi nghiêm trọng khi xuất bản: ${publishErr.message}`);
+    await sendTelegramMessage(chatId, `❌ Gặp lỗi nghiêm trọng trong quá trình xuất bản: ${publishErr.message}`);
+  } finally {
+    sessionStore.clear(chatId);
   }
 }
 
@@ -312,13 +385,10 @@ async function handleVideoMessage(message) {
 • <b>Dung lượng:</b> ${fileSizeMb} MB | <b>Thời lượng:</b> ${duration}
 
 ✍️ <b>Vui lòng gửi Caption cho bài đăng:</b>
-<i>(Ví dụ: 3 bé quậy tưng bừng. Bot sẽ tự động xuống dòng và thêm bộ 10 hashtags mặc định, riêng TikTok lấy 5 hashtags đầu tiên).</i>
-
-💡 Gõ <code>/skip</code> để dùng Caption mặc định (3 Little Bosses 🐾)
-💡 Gõ <code>/cancel</code> để huỷ bỏ
+<i>(Gõ caption gửi vào đây, hoặc bấm nút bên dưới để chọn nhanh)</i>
     `.trim();
 
-    await editTelegramMessage(chatId, notifyMsgId, askMsg);
+    await editTelegramMessage(chatId, notifyMsgId, askMsg, buildActionButtons());
 
   } catch (err) {
     logger.error('Telegram', `Lỗi tải video: ${err.message}`);
@@ -380,13 +450,10 @@ async function handlePhotoMessage(message) {
 📸 <b>ĐÃ NHẬN ${session.files.length} HÌNH ẢNH!</b>
 
 ✍️ <b>Vui lòng gửi Caption cho bài đăng:</b>
-<i>(Gõ caption tuỳ thích, bot sẽ tự động xuống dòng và thêm bộ hashtags mặc định #3LilBosses #ThreeLittleBosses...).</i>
-
-💡 Gõ <code>/skip</code> để dùng Caption mặc định (3 Little Bosses 🐾)
-💡 Gõ <code>/cancel</code> để huỷ bỏ
+<i>(Gõ caption gửi vào đây, hoặc bấm nút bên dưới để chọn nhanh)</i>
     `.trim();
 
-    await sendTelegramMessage(chatId, askMsg);
+    await sendTelegramMessage(chatId, askMsg, buildActionButtons());
   }, config.telegram.photoBatchWindowMs);
 }
 
@@ -409,13 +476,20 @@ async function startTelegramPolling() {
         params: {
           offset: pollingOffset,
           timeout: 25,
-          allowed_updates: JSON.stringify(['message']),
+          allowed_updates: JSON.stringify(['message', 'callback_query']),
         },
       });
 
       const updates = res.data?.result || [];
       for (const update of updates) {
         pollingOffset = update.update_id + 1;
+
+        // Xử lý nút bấm Inline Keyboard
+        if (update.callback_query) {
+          await handleCallbackQuery(update.callback_query);
+          continue;
+        }
+
         const msg = update.message;
         if (!msg) continue;
 

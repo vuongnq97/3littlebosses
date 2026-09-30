@@ -47,6 +47,7 @@ const config = {
   mediaServer: {
     port: parseInt(process.env.MEDIA_SERVER_PORT || '3005', 10),
     publicBaseUrl: (process.env.PUBLIC_BASE_URL || 'http://localhost:3005').replace(/\/+$/, ''),
+    autoTunnel: parseBool(process.env.AUTO_TUNNEL, true),
   },
 
   facebook: {

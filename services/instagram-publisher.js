@@ -15,7 +15,7 @@ const httpsAgent = new https.Agent({ rejectUnauthorized: false });
  */
 async function waitForContainerStatus(containerId, accessToken, apiVersion = 'v21.0', maxWaitMs = 120000) {
   const startTime = Date.now();
-  const checkUrl = `https://graph.facebook.com/${apiVersion}/${containerId}?fields=status_code&access_token=${accessToken}`;
+  const checkUrl = `https://graph.facebook.com/${apiVersion}/${containerId}?fields=status_code,status&access_token=${accessToken}`;
 
   while (Date.now() - startTime < maxWaitMs) {
     const res = await axios.get(checkUrl, { httpsAgent, timeout: 15000 });
@@ -25,7 +25,8 @@ async function waitForContainerStatus(containerId, accessToken, apiVersion = 'v2
       return true;
     }
     if (statusCode === 'ERROR' || statusCode === 'EXPIRED') {
-      throw new Error(`Instagram Container lỗi với status_code: ${statusCode}`);
+      const detail = JSON.stringify(res.data);
+      throw new Error(`Instagram Container lỗi với status_code: ${statusCode} (Chi tiết: ${detail})`);
     }
 
     // Chờ 3 giây trước lần poll kế tiếp

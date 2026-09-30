@@ -71,7 +71,7 @@ async function publishMultiPlatform(jobData, onProgress = () => {}) {
   // 5. TikTok
   if (config.tiktok.enabled) {
     tasks.push({
-      name: 'TikTok (via n8n)',
+      name: 'TikTok',
       key: 'tiktok',
       runner: () => publishToTikTok(jobData),
     });
