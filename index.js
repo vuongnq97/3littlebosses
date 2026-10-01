@@ -8,6 +8,7 @@ const config = require('./config');
 const logger = require('./utils/logger');
 const { startMediaServer, stopMediaServer } = require('./services/media-server');
 const { startTelegramPolling, stopTelegramPolling } = require('./services/telegram-bot');
+const { verifyMetaAccess } = require('./services/meta-checker');
 
 // Kiểm tra cờ CLI
 const args = process.argv.slice(2);
@@ -45,6 +46,9 @@ async function bootstrap() {
   } catch (err) {
     logger.error('App', `Không thể khởi chạy Media Server: ${err.message}`);
   }
+
+  // 2. Kiểm tra nhanh trạng thái Meta API Tokens
+  verifyMetaAccess().catch(() => {});
 
   // 2. Kiểm tra nếu chạy chế độ test
   if (args.includes('--test')) {

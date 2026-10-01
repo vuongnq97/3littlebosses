@@ -137,7 +137,23 @@ async function publishMultiPlatform(jobData, onProgress = () => {}) {
       });
       return { platform: t.name, key: t.key, status: 'SUCCESS', ...res };
     } catch (err) {
-      const errMsg = err.message || 'Lỗi không xác định';
+      let apiDetail = null;
+      if (err.response?.data) {
+        const d = err.response.data;
+        if (d.error?.message) {
+          apiDetail = d.error.message;
+          if (d.error.error_subcode) {
+            apiDetail += ` [subcode: ${d.error.error_subcode}]`;
+          }
+        } else if (d.error_message) {
+          apiDetail = d.error_message;
+        } else if (typeof d === 'string') {
+          apiDetail = d;
+        } else {
+          apiDetail = JSON.stringify(d);
+        }
+      }
+      const errMsg = apiDetail ? `${err.message} (${apiDetail})` : (err.message || 'Lỗi không xác định');
       logger.error('MultiPublisher', `Thất bại tại [${t.name}]: ${errMsg}`);
       onProgress({
         platform: t.name,
