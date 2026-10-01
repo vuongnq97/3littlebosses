@@ -96,4 +96,28 @@ const config = {
   },
 };
 
+config.reload = function reloadConfig() {
+  const envPath = path.join(__dirname, '.env');
+  if (fs.existsSync(envPath)) {
+    const envConfig = dotenv.parse(fs.readFileSync(envPath));
+    for (const k in envConfig) {
+      process.env[k] = envConfig[k];
+    }
+  }
+  config.facebook.accessToken = process.env.FB_PAGE_ACCESS_TOKEN || '';
+  config.facebook.pageId = process.env.FB_PAGE_ID || '';
+  config.facebook.enabled = parseBool(process.env.ENABLE_FACEBOOK, true);
+
+  config.instagram.accessToken = process.env.IG_ACCESS_TOKEN || process.env.FB_PAGE_ACCESS_TOKEN || '';
+  config.instagram.userId = process.env.IG_USER_ID || '';
+  config.instagram.enabled = parseBool(process.env.ENABLE_INSTAGRAM, false);
+
+  config.threads.accessToken = process.env.THREADS_ACCESS_TOKEN || '';
+  config.threads.userId = process.env.THREADS_USER_ID || '';
+  config.threads.enabled = parseBool(process.env.ENABLE_THREADS, false);
+
+  config.mediaServer.publicBaseUrl = (process.env.PUBLIC_BASE_URL || 'http://localhost:3005').replace(/\/+$/, '');
+  return config;
+};
+
 module.exports = config;

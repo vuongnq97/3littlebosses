@@ -7,6 +7,7 @@ const axios = require('axios');
 const config = require('../config');
 const logger = require('../utils/logger');
 const sessionStore = require('./session-store');
+const retryStore = require('./retry-store');
 const { publishMultiPlatform } = require('./multi-publisher');
 const {
   generateJobId,
@@ -251,6 +252,20 @@ async function handleCallbackQuery(cq) {
     }
     return;
   }
+
+  // Xử lý Thử lại (Retry) các kênh bị lỗi
+  if (data.startsWith('retry:')) {
+    const retryId = data.replace('retry:', '');
+    await handleRetryCallback(cq, retryId);
+    return;
+  }
+
+  // Xử lý Huỷ bỏ Thử lại
+  if (data.startsWith('retry_cancel:')) {
+    const retryId = data.replace('retry_cancel:', '');
+    await handleRetryCancelCallback(cq, retryId);
+    return;
+  }
 }
 
 /**
@@ -331,20 +346,226 @@ async function processPublishSession(chatId, text = '') {
     await editTelegramMessage(chatId, progressMsgId, formatProgressText());
 
     // Gửi báo cáo tổng kết kèm danh sách link xem bài đăng
+    const failedTasks = (summary.results || []).filter(r => r.status === 'FAILED');
+
     let reportMsg = `🎉 <b>KẾT QUẢ ĐĂNG TẢI HOÀN TẤT!</b>\n`;
     reportMsg += `• Thành công: <b>${summary.successCount}/${summary.total}</b> nền tảng.\n\n`;
 
-    reportMsg += summary.success
-      ? '✨ Tất cả nội dung đã được phân phối thành công!'
-      : '⚠️ Có một số nền tảng gặp sự cố, vui lòng xem chi tiết ở trên.';
+    if (summary.success || failedTasks.length === 0) {
+      reportMsg += '✨ Tất cả nội dung đã được phân phối thành công!';
+      await sendTelegramMessage(chatId, reportMsg.trim());
+    } else {
+      reportMsg += `⚠️ <b>Các kênh gặp sự cố (${failedTasks.length}):</b>\n`;
+      for (const f of failedTasks) {
+        reportMsg += `• <b>${f.platform}:</b> <i>${f.error || 'Lỗi không xác định'}</i>\n`;
+      }
+      reportMsg += `\n💡 <i>Sau khi cập nhật token hoặc đường truyền, bạn có thể bấm nút dưới đây để thử lại (chỉ đăng lại các kênh bị lỗi này).</i>`;
 
-    await sendTelegramMessage(chatId, reportMsg.trim());
+      const retryId = retryStore.create({
+        chatId,
+        jobData,
+        failedPlatforms: failedTasks.map(f => ({ key: f.key, platform: f.platform, error: f.error })),
+      });
+
+      const failedNames = failedTasks.map(f => f.platform).join(', ');
+      const retryMarkup = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: `🔄 Thử lại ${failedTasks.length} kênh lỗi (${failedNames})`,
+                callback_data: `retry:${retryId}`,
+              },
+            ],
+            [
+              {
+                text: '❌ Bỏ qua (Dọn dẹp file)',
+                callback_data: `retry_cancel:${retryId}`,
+              },
+            ],
+          ],
+        },
+      };
+
+      await sendTelegramMessage(chatId, reportMsg.trim(), retryMarkup);
+    }
 
   } catch (publishErr) {
     logger.error('Telegram', `Lỗi nghiêm trọng khi xuất bản: ${publishErr.message}`);
     await sendTelegramMessage(chatId, `❌ Gặp lỗi nghiêm trọng trong quá trình xuất bản: ${publishErr.message}`);
   } finally {
     sessionStore.clear(chatId);
+  }
+}
+
+/**
+ * Huỷ phiên Retry và dọn dẹp file tạm
+ */
+async function handleRetryCancelCallback(cq, retryId) {
+  const chatId = String(cq.message?.chat?.id || cq.from?.id);
+  const messageId = cq.message?.message_id;
+
+  const retrySession = retryStore.get(retryId);
+  if (retrySession?.jobData?.jobId) {
+    cleanJobDir(retrySession.jobData.jobId);
+  }
+  retryStore.delete(retryId);
+
+  await answerCallbackQuery(cq.id, 'Đã huỷ bỏ phiên thử lại.');
+  if (messageId) {
+    await editTelegramMessage(chatId, messageId, '❌ <b>Đã huỷ bỏ thử lại. File tạm đã được dọn dẹp.</b>');
+  }
+}
+
+/**
+ * Thực hiện Thử lại (Retry) chỉ cho các kênh bị lỗi
+ */
+async function handleRetryCallback(cq, retryId) {
+  const chatId = String(cq.message?.chat?.id || cq.from?.id);
+  const messageId = cq.message?.message_id;
+
+  const retrySession = retryStore.get(retryId);
+  if (!retrySession) {
+    await answerCallbackQuery(cq.id, '⚠️ Phiên thử lại đã hết hạn hoặc không tồn tại.');
+    if (messageId) {
+      await editTelegramMessage(chatId, messageId, '⚠️ <i>Phiên thử lại này đã hết hạn.</i>');
+    }
+    return;
+  }
+
+  if (retrySession.status === 'RUNNING') {
+    await answerCallbackQuery(cq.id, '⏳ Đang trong quá trình thử lại, vui lòng chờ...');
+    return;
+  }
+
+  const { jobData, failedPlatforms } = retrySession;
+  const firstFile = jobData?.files?.[0];
+
+  // Kiểm tra file media còn tồn tại không
+  if (!firstFile || !fs.existsSync(firstFile)) {
+    await answerCallbackQuery(cq.id, '❌ File media không còn trên máy chủ.');
+    if (messageId) {
+      await editTelegramMessage(chatId, messageId, '❌ <b>File media tạm đã bị xoá. Vui lòng gửi lại video/ảnh mới để đăng.</b>');
+    }
+    retryStore.delete(retryId);
+    return;
+  }
+
+  // Đánh dấu phiên đang chạy
+  retryStore.update(retryId, { status: 'RUNNING' });
+
+  // Tự động nạp lại .env mới nhất (nếu người dùng vừa sửa token trong .env)
+  if (typeof config.reload === 'function') {
+    config.reload();
+  }
+
+  const targetKeys = failedPlatforms.map(p => p.key);
+  const targetNames = failedPlatforms.map(p => p.platform).join(', ');
+
+  await answerCallbackQuery(cq.id, `🔄 Đang thử lại: ${targetNames}...`);
+
+  if (messageId) {
+    await editTelegramMessage(chatId, messageId, `⏳ <b>Đang thực hiện thử lại cho các kênh:</b> ${targetNames}...`);
+  }
+
+  const progressMsgId = await sendTelegramMessage(chatId, `
+🔄 <b>BẮT ĐẦU THỬ LẠI CHO CÁC KÊNH LỖI:</b>
+• Kênh: <b>${targetNames}</b>
+• File: <code>${path.basename(firstFile)}</code>
+
+<i>Đang kết nối lại API...</i>
+  `.trim());
+
+  const platformStatuses = new Map();
+  let updateTimer = null;
+  const triggerMessageUpdate = () => {
+    if (updateTimer) return;
+    updateTimer = setTimeout(async () => {
+      updateTimer = null;
+      await editTelegramMessage(chatId, progressMsgId, formatProgressText());
+    }, 1500);
+  };
+
+  const formatProgressText = () => {
+    let msg = `🔄 <b>TIẾN ĐỘ THỬ LẠI (${targetNames}):</b>\n\n`;
+    for (const [name, p] of platformStatuses.entries()) {
+      let icon = '⏳';
+      if (p.status === 'SUCCESS') icon = '✅';
+      if (p.status === 'FAILED') icon = '❌';
+      if (p.status === 'SKIPPED') icon = '⏭️';
+
+      let line = `${icon} <b>${name}:</b> ${p.message}`;
+      if (p.url) {
+        line += ` — <a href="${p.url}">Xem tại đây</a>`;
+      }
+      msg += `${line}\n`;
+    }
+    return msg.trim();
+  };
+
+  const retryJobData = {
+    ...jobData,
+    targetPlatforms: targetKeys,
+  };
+
+  try {
+    const summary = await publishMultiPlatform(retryJobData, (update) => {
+      platformStatuses.set(update.platform, update);
+      triggerMessageUpdate();
+    });
+
+    if (updateTimer) {
+      clearTimeout(updateTimer);
+      updateTimer = null;
+    }
+    await editTelegramMessage(chatId, progressMsgId, formatProgressText());
+
+    const stillFailed = (summary.results || []).filter(r => r.status === 'FAILED');
+
+    if (stillFailed.length === 0) {
+      // Thành công toàn bộ các kênh thử lại
+      retryStore.delete(retryId);
+      cleanJobDir(jobData.jobId);
+      await sendTelegramMessage(chatId, `🎉 <b>THỬ LẠI THÀNH CÔNG!</b>\n✨ Tất cả ${summary.successCount}/${summary.total} kênh lỗi trước đó đã được xuất bản hoàn tất!`);
+    } else {
+      // Vẫn còn kênh bị lỗi -> cập nhật danh sách và cho phép thử lại tiếp
+      retryStore.update(retryId, {
+        status: 'FAILED',
+        failedPlatforms: stillFailed.map(f => ({ key: f.key, platform: f.platform, error: f.error })),
+      });
+      const stillFailedNames = stillFailed.map(f => f.platform).join(', ');
+      const retryMarkup = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: `🔄 Thử lại tiếp (${stillFailed.length} kênh: ${stillFailedNames})`,
+                callback_data: `retry:${retryId}`,
+              },
+            ],
+            [
+              {
+                text: '❌ Bỏ qua',
+                callback_data: `retry_cancel:${retryId}`,
+              },
+            ],
+          ],
+        },
+      };
+
+      let failMsg = `⚠️ <b>KẾT QUẢ THỬ LẠI:</b>\n`;
+      failMsg += `• Thành công: <b>${summary.successCount}/${summary.total}</b> kênh.\n`;
+      failMsg += `• Vẫn còn lỗi tại (${stillFailed.length} kênh):\n`;
+      for (const f of stillFailed) {
+        failMsg += `  - <b>${f.platform}:</b> <i>${f.error || 'Lỗi'}</i>\n`;
+      }
+      failMsg += `\n💡 <i>Bạn có thể kiểm tra lại token/cấu hình trong .env rồi bấm nút bên dưới để thử lại tiếp.</i>`;
+      await sendTelegramMessage(chatId, failMsg.trim(), retryMarkup);
+    }
+  } catch (err) {
+    retryStore.update(retryId, { status: 'FAILED' });
+    logger.error('Telegram', `Lỗi khi thực hiện Retry: ${err.message}`);
+    await sendTelegramMessage(chatId, `❌ Lỗi khi thực hiện thử lại: ${err.message}`);
   }
 }
 

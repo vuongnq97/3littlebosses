@@ -24,17 +24,20 @@ const { publishToTwitter } = require('./twitter-publisher');
  * @param {function} [onProgress] Callback cập nhật tiến độ cho Telegram Bot
  */
 async function publishMultiPlatform(jobData, onProgress = () => {}) {
-  const { jobId, mediaType, files, caption, hashtags, fullText } = jobData;
+  const { jobId, mediaType, files, caption, hashtags, fullText, targetPlatforms } = jobData;
   logger.divider();
-  logger.info('MultiPublisher', `Bắt đầu xuất bản đa nền tảng cho ${jobId} (${mediaType.toUpperCase()})`);
+  const targetLabel = Array.isArray(targetPlatforms) && targetPlatforms.length > 0
+    ? `[CHỈ ĐĂNG LẠI: ${targetPlatforms.join(', ')}]`
+    : '[TẤT CẢ KÊNH]';
+  logger.info('MultiPublisher', `Bắt đầu xuất bản đa nền tảng cho ${jobId} (${mediaType.toUpperCase()}) ${targetLabel}`);
   logger.info('MultiPublisher', `Nội dung: "${caption.substring(0, 60)}..."`);
   logger.divider();
 
-  const tasks = [];
+  const allTasks = [];
 
   // 1. Facebook Fanpage
   if (config.facebook.enabled) {
-    tasks.push({
+    allTasks.push({
       name: 'Facebook Fanpage',
       key: 'facebook',
       runner: () => publishToFacebook(jobData),
@@ -43,7 +46,7 @@ async function publishMultiPlatform(jobData, onProgress = () => {}) {
 
   // 2. Instagram
   if (config.instagram.enabled) {
-    tasks.push({
+    allTasks.push({
       name: 'Instagram',
       key: 'instagram',
       runner: () => publishToInstagram(jobData),
@@ -52,7 +55,7 @@ async function publishMultiPlatform(jobData, onProgress = () => {}) {
 
   // 3. Threads
   if (config.threads.enabled) {
-    tasks.push({
+    allTasks.push({
       name: 'Threads',
       key: 'threads',
       runner: () => publishToThreads(jobData),
@@ -61,7 +64,7 @@ async function publishMultiPlatform(jobData, onProgress = () => {}) {
 
   // 4. YouTube
   if (config.youtube.enabled) {
-    tasks.push({
+    allTasks.push({
       name: 'YouTube',
       key: 'youtube',
       runner: () => publishToYouTube(jobData),
@@ -70,7 +73,7 @@ async function publishMultiPlatform(jobData, onProgress = () => {}) {
 
   // 5. TikTok
   if (config.tiktok.enabled) {
-    tasks.push({
+    allTasks.push({
       name: 'TikTok',
       key: 'tiktok',
       runner: () => publishToTikTok(jobData),
@@ -79,15 +82,20 @@ async function publishMultiPlatform(jobData, onProgress = () => {}) {
 
   // 6. X (Twitter)
   if (config.twitter.enabled) {
-    tasks.push({
+    allTasks.push({
       name: 'X (Twitter)',
       key: 'twitter',
       runner: () => publishToTwitter(jobData),
     });
   }
 
+  // Lọc chỉ chạy các nền tảng được chỉ định (nếu có yêu cầu retry cụ thể)
+  const tasks = (Array.isArray(targetPlatforms) && targetPlatforms.length > 0)
+    ? allTasks.filter(t => targetPlatforms.includes(t.key))
+    : allTasks;
+
   if (tasks.length === 0) {
-    logger.warn('MultiPublisher', 'Không có nền tảng nào được kích hoạt trong cấu hình .env');
+    logger.warn('MultiPublisher', 'Không có nền tảng nào được kích hoạt hoặc thoả điều kiện lọc trong .env');
     return {
       success: false,
       jobId,
@@ -168,28 +176,33 @@ async function publishMultiPlatform(jobData, onProgress = () => {}) {
 
   const settled = await Promise.all(taskPromises);
 
-  // Dọn dẹp file tạm nếu cấu hình autoCleanup
-  if (config.app.autoCleanup) {
+  // Dọn dẹp file tạm: Nếu thành công toàn bộ -> dọn sau 60s. Nếu còn lỗi -> GIỮ LẠI để user bấm Retry!
+  const successCount = settled.filter(r => r.status === 'SUCCESS').length;
+  const failedCount = settled.filter(r => r.status === 'FAILED').length;
+  const allSuccess = settled.length > 0 && failedCount === 0;
+
+  if (config.app.autoCleanup && allSuccess) {
     const timer = setTimeout(() => {
-      logger.info('MultiPublisher', `Tự động dọn dẹp thư mục tạm cho ${jobId}`);
+      logger.info('MultiPublisher', `Tất cả kênh thành công. Tự động dọn dẹp thư mục tạm cho ${jobId}`);
       cleanJobDir(jobId);
-    }, 60000); // Giữ 1 phút cho các luồng async nếu có trước khi dọn
+    }, 60000);
     if (timer && typeof timer.unref === 'function') {
       timer.unref();
     }
+  } else if (failedCount > 0) {
+    logger.info('MultiPublisher', `Còn ${failedCount} kênh thất bại. Đang giữ lại file tạm để hỗ trợ Retry từ Telegram.`);
   }
 
-
-  const successCount = settled.filter(r => r.status === 'SUCCESS').length;
   logger.divider();
   logger.info('MultiPublisher', `Hoàn thành xuất bản: ${successCount}/${settled.length} thành công.`);
   logger.divider();
 
   return {
-    success: successCount > 0,
+    success: allSuccess,
     jobId,
     total: settled.length,
     successCount,
+    failedCount,
     results: settled,
   };
 }
