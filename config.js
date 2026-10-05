@@ -42,6 +42,10 @@ const config = {
     botToken: process.env.TELEGRAM_BOT_TOKEN || '',
     allowedChatIds: parseList(process.env.ALLOWED_CHAT_IDS),
     photoBatchWindowMs: parseInt(process.env.PHOTO_BATCH_WINDOW_MS || '4000', 10),
+    // Local Bot API Server (cho phép tải file tới 2GB). Mặc định dùng server cloud (giới hạn 20MB).
+    apiBase: (process.env.TELEGRAM_API_BASE || 'https://api.telegram.org').replace(/\/+$/, ''),
+    localContainerDir: (process.env.TELEGRAM_LOCAL_CONTAINER_DIR || '/var/lib/telegram-bot-api').replace(/\/+$/, ''),
+    localHostDir: process.env.TELEGRAM_LOCAL_HOST_DIR || '',
   },
 
   mediaServer: {

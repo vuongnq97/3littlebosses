@@ -26,7 +26,15 @@ let pollingOffset = 0;
 function getBotUrl() {
   const token = config.telegram.botToken;
   if (!token) return null;
-  return `https://api.telegram.org/bot${token}`;
+  return `${config.telegram.apiBase}/bot${token}`;
+}
+
+function isLocalApiServer() {
+  return config.telegram.apiBase !== 'https://api.telegram.org';
+}
+
+function getMaxDownloadBytes() {
+  return isLocalApiServer() ? 2000 * 1024 * 1024 : 20 * 1024 * 1024;
 }
 
 async function sendTelegramMessage(chatId, text, options = {}) {
@@ -102,13 +110,42 @@ async function downloadTelegramFile(fileId, destinationPath) {
   const token = config.telegram.botToken;
 
   // 1. Lấy filePath từ Telegram
-  const infoRes = await tgHttp.get(`${botUrl}/getFile`, { params: { file_id: fileId } });
+  let infoRes;
+  try {
+    infoRes = await tgHttp.get(`${botUrl}/getFile`, { params: { file_id: fileId } });
+  } catch (err) {
+    const desc = err.response?.data?.description;
+    if (desc) {
+      if (/file is too big/i.test(desc)) {
+        throw new Error(
+          `File vượt giới hạn 20MB của Telegram Bot API (bot không tải được). Hãy nén video nhỏ hơn 20MB rồi gửi lại.`
+        );
+      }
+      throw new Error(`Telegram getFile: ${desc}`);
+    }
+    throw err;
+  }
   if (!infoRes.data?.ok) {
     throw new Error(`Telegram getFile thất bại: ${JSON.stringify(infoRes.data)}`);
   }
 
   const remoteFilePath = infoRes.data.result.file_path;
-  const fileDownloadUrl = `https://api.telegram.org/file/bot${token}/${remoteFilePath}`;
+
+  // Local Bot API Server trả về đường dẫn tuyệt đối trong container -> copy từ thư mục mount
+  if (isLocalApiServer() && path.isAbsolute(remoteFilePath)) {
+    const { localContainerDir, localHostDir } = config.telegram;
+    let hostPath = remoteFilePath;
+    if (localHostDir && remoteFilePath.startsWith(localContainerDir)) {
+      hostPath = path.join(localHostDir, remoteFilePath.slice(localContainerDir.length));
+    }
+    if (!fs.existsSync(hostPath)) {
+      throw new Error(`Không tìm thấy file từ Local Bot API Server: ${hostPath} (kiểm tra TELEGRAM_LOCAL_HOST_DIR / volume docker)`);
+    }
+    await fs.promises.copyFile(hostPath, destinationPath);
+    return destinationPath;
+  }
+
+  const fileDownloadUrl = `${config.telegram.apiBase}/file/bot${token}/${remoteFilePath}`;
 
   // 2. Tải binary stream về đĩa
   const writer = fs.createWriteStream(destinationPath);
@@ -582,6 +619,16 @@ async function handleVideoMessage(message) {
   const fileId = video.file_id;
   const fileSizeMb = (video.file_size / (1024 * 1024)).toFixed(2);
   const duration = video.duration ? `${video.duration}s` : 'N/A';
+
+  const maxBytes = getMaxDownloadBytes();
+  if (video.file_size && video.file_size > maxBytes) {
+    const maxMb = Math.round(maxBytes / (1024 * 1024));
+    await sendTelegramMessage(
+      chatId,
+      `❌ Video <b>${fileSizeMb} MB</b> vượt giới hạn <b>${maxMb}MB</b> của Telegram Bot API nên bot không thể tải về.\n💡 Hãy nén/cắt video xuống dưới ${maxMb}MB rồi gửi lại.`
+    );
+    return;
+  }
 
   const notifyMsgId = await sendTelegramMessage(chatId, `📥 Đang tải video (${fileSizeMb} MB) về máy chủ... Vui lòng đợi trong giây lát!`);
 
